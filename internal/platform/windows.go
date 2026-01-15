@@ -307,3 +307,45 @@ func (w *WindowsAdapter) GetProcesses(ctx context.Context) ([]core.Process, erro
 func (w *WindowsAdapter) StartProcess(ctx context.Context, process core.Process) error {
 	return nil
 }
+
+// Classification Helpers
+func isTerminal(app string) bool {
+	switch app {
+	case "WindowsTerminal.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "mintty.exe":
+		return true
+	}
+	return false
+}
+
+func isBrowser(app string) bool {
+	switch app {
+	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe":
+		return true
+	}
+	return false
+}
+
+func isIDE(app string) bool {
+	// "Code.exe" is VS Code
+	switch app {
+	case "Code.exe", "idea64.exe", "goland64.exe":
+		return true
+	}
+	return false
+}
+
+func guessShell(app string) string {
+	if app == "cmd.exe" {
+		return "cmd"
+	}
+	if app == "powershell.exe" || app == "pwsh.exe" {
+		return "powershell"
+	}
+	return "unknown"
+}
+
+func extractProjectFromTitle(title string) string {
+	// VS Code: "filename.go - ProjectName - Visual Studio Code"
+	// Heuristic: Extract the project name from the title string.
+	return title // Currently returns the full title.
+}
