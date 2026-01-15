@@ -11,11 +11,11 @@ import (
 )
 
 type MCPServer struct {
-	manager *snapshot.ManagerV2
+	manager *snapshot.Manager
 	server  *server.MCPServer
 }
 
-func NewMCPServer(manager *snapshot.ManagerV2) *MCPServer {
+func NewMCPServer(manager *snapshot.Manager) *MCPServer {
 	s := server.NewMCPServer(
 		"Dev Environment Snapshots",
 		"1.0.0",
@@ -82,7 +82,7 @@ func (s *MCPServer) handleCaptureSnapshot(ctx context.Context, request mcp.CallT
 		}
 	}
 
-	snap, err := s.manager.Capture(ctx, snapshot.CaptureOptionsV2{
+	snap, err := s.manager.Capture(ctx, snapshot.CaptureOptions{
 		Name:        name,
 		Description: desc,
 		// Defaults
@@ -105,7 +105,7 @@ func (s *MCPServer) handleRestoreSnapshot(ctx context.Context, request mcp.CallT
 		}
 	}
 
-	report, err := s.manager.Restore(ctx, id, snapshot.RestoreOptionsV2{
+	report, err := s.manager.Restore(ctx, id, snapshot.RestoreOptions{
 		ValidateBeforeRestore: false, // Default false for basic restore tool
 		SkipMissingApps:       true,
 		DryRun:                false,

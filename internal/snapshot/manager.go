@@ -25,12 +25,18 @@ func NewManager(repo core.Repository, platform core.PlatformAdapter) *Manager {
 	}
 }
 
+// SetSanitizationOptions permite configurar la sanitización
+func (m *Manager) SetSanitizationOptions(opts sanitize.SanitizationOptions) {
+	m.sanitizer = sanitize.NewSanitizer(opts)
+}
+
 type CaptureOptions struct {
 	Name             string
 	Description      string
 	Tags             []string
-	IncludeBrowsable bool // Browsers
+	IncludeBrowsable bool
 	IncludeTerminals bool
+	Sanitize         bool // Si es true, sanitiza datos sensibles
 }
 
 func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snapshot, error) {
@@ -50,11 +56,10 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 	}
 	s.Windows = windows
 
-	// 2. Capture Terminals (if requested)
+	// 2. Capture Terminals
 	if opts.IncludeTerminals {
 		terminals, err := m.platform.GetTerminals(ctx)
 		if err != nil {
-			// Log error and return strictly if terminals capture fails.
 			return nil, fmt.Errorf("failed to capture terminals: %w", err)
 		}
 		s.Terminals = terminals
@@ -70,7 +75,7 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 		s.GitHeadHash = gitCtx.HeadHash
 	}
 
-	// Capture Browsers
+	// 4. Capture Browsers
 	if opts.IncludeBrowsable {
 		browsers, err := m.platform.GetBrowserTabs(ctx)
 		if err == nil && len(browsers) > 0 {
@@ -78,16 +83,18 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 		}
 	}
 
-	// Capture IDEs
+	// 5. Capture IDEs
 	ideFiles, err := m.platform.GetIDEFiles(ctx)
 	if err == nil && len(ideFiles) > 0 {
 		s.IDEFiles = ideFiles
 	}
 
-	// 4. Sanitize Snapshot Data
-	m.sanitizer.SanitizeSnapshot(s)
+	// 6. Sanitize if requested
+	if opts.Sanitize {
+		m.sanitizer.SanitizeSnapshot(s)
+	}
 
-	// 5. Save to DB
+	// 7. Save to DB
 	if err := m.repo.CreateSnapshot(ctx, s); err != nil {
 		return nil, fmt.Errorf("failed to save snapshot metadata: %w", err)
 	}
@@ -119,33 +126,124 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 	return s, nil
 }
 
-func (m *Manager) Restore(ctx context.Context, snapshotID string) error {
+type RestoreOptions struct {
+	ValidateBeforeRestore bool // Verifica que las apps existan antes de restaurar
+	SkipMissingApps       bool // Si true, continúa aunque falten apps
+	DryRun                bool // Si true, solo reporta qué haría sin ejecutar
+}
+
+func (m *Manager) Restore(ctx context.Context, snapshotID string, opts RestoreOptions) (*RestoreReport, error) {
 	s, err := m.repo.GetSnapshotByID(ctx, snapshotID)
 	if err != nil {
-		return fmt.Errorf("failed to get snapshot: %w", err)
+		return nil, fmt.Errorf("failed to get snapshot: %w", err)
 	}
 	if s == nil {
-		return fmt.Errorf("snapshot not found")
+		return nil, fmt.Errorf("snapshot not found")
 	}
 
-	// Restore logic
-	// Note: In a production implementation, windows should be fetched from the database if not already populated.
-	// For this version, we assume windows are either populated or we fetch them now.
-
-	// Fetch windows if not populated
+	// Fetch windows from DB
 	windows, err := m.repo.GetWindows(ctx, snapshotID)
-	if err == nil {
-		s.Windows = windows
+	if err != nil {
+		return nil, fmt.Errorf("failed to get windows: %w", err)
+	}
+	s.Windows = windows
+
+	report := &RestoreReport{
+		SnapshotID:   snapshotID,
+		TotalWindows: len(s.Windows),
+		StartTime:    time.Now(),
 	}
 
-	for _, w := range s.Windows {
-		if err := m.platform.RestoreWindow(ctx, w); err != nil {
-			fmt.Printf("Error restoring window %s: %v\n", w.AppName, err)
-			continue
+	// Validación pre-restore
+	if opts.ValidateBeforeRestore {
+		missing := m.validateApps(ctx, s.Windows)
+		report.MissingApps = missing
+
+		if len(missing) > 0 && !opts.SkipMissingApps {
+			report.Success = false
+			report.Error = fmt.Sprintf("missing applications: %v", missing)
+			return report, fmt.Errorf("cannot restore: missing applications")
 		}
 	}
 
-	return nil
+	// Dry run mode
+	if opts.DryRun {
+		report.Success = true
+		report.DryRun = true
+		report.Message = "Dry run completed - no changes made"
+		return report, nil
+	}
+
+	// Restore windows
+	for _, w := range s.Windows {
+		if err := m.platform.RestoreWindow(ctx, w); err != nil {
+			report.FailedWindows = append(report.FailedWindows, w.WindowTitle)
+			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", w.WindowTitle, err))
+			continue
+		}
+		report.RestoredWindows++
+	}
+
+	report.EndTime = time.Now()
+	report.Duration = report.EndTime.Sub(report.StartTime)
+	report.Success = report.RestoredWindows > 0
+
+	if report.RestoredWindows == report.TotalWindows {
+		report.Message = "All windows restored successfully"
+	} else {
+		report.Message = fmt.Sprintf("Restored %d/%d windows", report.RestoredWindows, report.TotalWindows)
+	}
+
+	return report, nil
+}
+
+// RestoreReport contiene el resultado detallado de una restauración
+type RestoreReport struct {
+	SnapshotID      string
+	TotalWindows    int
+	RestoredWindows int
+	FailedWindows   []string
+	MissingApps     []string
+	Errors          []string
+	Success         bool
+	DryRun          bool
+	Error           string
+	Message         string
+	StartTime       time.Time
+	EndTime         time.Time
+	Duration        time.Duration
+}
+
+// validateApps verifica qué aplicaciones están instaladas
+func (m *Manager) validateApps(ctx context.Context, windows []core.Window) []string {
+	// Obtener ventanas actuales para ver qué apps están corriendo
+	currentWindows, err := m.platform.GetWindows(ctx)
+	if err != nil {
+		return nil
+	}
+
+	// Crear set de apps disponibles
+	availableApps := make(map[string]bool)
+	for _, w := range currentWindows {
+		availableApps[w.AppName] = true
+	}
+
+	// Verificar qué apps faltan
+	var missing []string
+	checked := make(map[string]bool)
+
+	for _, w := range windows {
+		if checked[w.AppName] {
+			continue
+		}
+		checked[w.AppName] = true
+
+		if !availableApps[w.AppName] {
+			missing = append(missing, w.AppName)
+		}
+	}
+
+	return missing
 }
 
 func (m *Manager) List(ctx context.Context) ([]core.Snapshot, error) {
@@ -179,8 +277,6 @@ func (m *Manager) Diff(ctx context.Context, id1, id2 string) (*DiffResult, error
 		return nil, fmt.Errorf("one or both snapshots not found")
 	}
 
-	// Get Windows for both (assuming loaded or need fetch)
-	// For MVP doing simple list diff based on Title
 	w1, _ := m.repo.GetWindows(ctx, id1)
 	w2, _ := m.repo.GetWindows(ctx, id2)
 

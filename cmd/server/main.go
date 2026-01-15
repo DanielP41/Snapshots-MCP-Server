@@ -37,12 +37,12 @@ func main() {
 		// Detailed implementation of windows.go allows native execution on Windows.
 		// Note: Build tags would be used in a cross-compilation setup.
 		// Current assumption: Running on Windows.
-		adapter = platform.NewWindowsAdapterV2()
-		log.Println("Using Windows Adapter V2 (Smart Matching Enabled)")
+		adapter = platform.NewWindowsAdapter()
+		log.Println("Using Windows Adapter V2 (Renamed to Canonical)")
 	}
 
 	// 3. Setup Logic
-	manager := snapshot.NewManagerV2(repo, adapter)
+	manager := snapshot.NewManager(repo, adapter)
 
 	// 4. Start MCP Server
 	mcpServer := server.NewMCPServer(manager)
