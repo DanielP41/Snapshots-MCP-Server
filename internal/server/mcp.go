@@ -11,11 +11,11 @@ import (
 )
 
 type MCPServer struct {
-	manager *snapshot.Manager
+	manager *snapshot.ManagerV2
 	server  *server.MCPServer
 }
 
-func NewMCPServer(manager *snapshot.Manager) *MCPServer {
+func NewMCPServer(manager *snapshot.ManagerV2) *MCPServer {
 	s := server.NewMCPServer(
 		"Dev Environment Snapshots",
 		"1.0.0",
@@ -82,12 +82,13 @@ func (s *MCPServer) handleCaptureSnapshot(ctx context.Context, request mcp.CallT
 		}
 	}
 
-	snap, err := s.manager.Capture(ctx, snapshot.CaptureOptions{
+	snap, err := s.manager.Capture(ctx, snapshot.CaptureOptionsV2{
 		Name:        name,
 		Description: desc,
 		// Defaults
 		IncludeBrowsable: true,
 		IncludeTerminals: true,
+		Sanitize:         true,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to capture: %v", err)), nil
@@ -104,12 +105,16 @@ func (s *MCPServer) handleRestoreSnapshot(ctx context.Context, request mcp.CallT
 		}
 	}
 
-	err := s.manager.Restore(ctx, id)
+	report, err := s.manager.Restore(ctx, id, snapshot.RestoreOptionsV2{
+		ValidateBeforeRestore: false, // Default false for basic restore tool
+		SkipMissingApps:       true,
+		DryRun:                false,
+	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Snapshot %s restored successfully (mock/stub mode)", id)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Restore Completed: %s", report.Message)), nil
 }
 
 func (s *MCPServer) handleListSnapshots(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

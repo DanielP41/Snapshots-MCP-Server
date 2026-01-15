@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// 3. Setup Logic
-	manager := snapshot.NewManager(repo, adapter)
+	manager := snapshot.NewManagerV2(repo, adapter)
 
 	// 4. Start MCP Server
 	mcpServer := server.NewMCPServer(manager)
