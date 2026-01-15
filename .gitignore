@@ -1,0 +1,18 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+
+# DB
+*.db
+*.db-journal
+
+# IDE
+.vscode/
+.idea/
+
+# Go
+go.sum
+vendor/
