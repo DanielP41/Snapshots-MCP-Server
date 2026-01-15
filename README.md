@@ -53,13 +53,13 @@ Add the server to your Claude Desktop configuration file (`%APPDATA%\Claude\clau
 
 ### Available Tools
 
-| Tool | Description |
-| :--- | :--- | :--- |
+| Tool               | Description                                    |
+|               :--- |                                           :--- |
 | `capture_snapshot` | Captures the current state of the environment. |
-| `restore_snapshot` | Restores windows to a previous state. |
-| `list_snapshots` | Lists all saved snapshots. |
-| `delete_snapshot` | Deletes a snapshot by ID. |
-| `diff_snapshots` | Compares two snapshots. |
+| `restore_snapshot` | Restores windows to a previous state.          |
+| `list_snapshots`   | Lists all saved snapshots.                     |
+| `delete_snapshot`  | Deletes a snapshot by ID.                      |
+| `diff_snapshots`   | Compares two snapshots.                        |
 
 ## Security Note
 
