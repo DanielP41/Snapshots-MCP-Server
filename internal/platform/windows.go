@@ -96,44 +96,105 @@ func (w *WindowsAdapter) GetWindows(ctx context.Context) ([]core.Window, error) 
 }
 
 func (w *WindowsAdapter) RestoreWindow(ctx context.Context, window core.Window) error {
-	// Need to find window by title again since HWND changes
-	// Simplified restoration: Find first window with exact title match
-	var foundHwnd syscall.Handle
+	// 1. Get current windows to use as candidates
+	// We need both the metadata (for matching) and the HWND (for action)
+	// Since GetWindows returns core.Window (without HWND), we need a way to map back.
+	// For this implementation, we will re-enumerate and build a map.
+
+	type windowWithHandle struct {
+		Window core.Window
+		Hwnd   syscall.Handle
+	}
+
+	var candidates []windowWithHandle
 
 	cb := syscall.NewCallback(func(hwnd syscall.Handle, lparam uintptr) uintptr {
-		ret, _, _ := procGetWindowTextLengthW.Call(uintptr(hwnd))
-		if int(ret) == 0 {
+		// Visible check
+		ret, _, _ := procIsWindowVisible.Call(uintptr(hwnd))
+		if ret == 0 {
 			return 1
 		}
+
+		// Title
+		ret, _, _ = procGetWindowTextLengthW.Call(uintptr(hwnd))
+		if ret == 0 {
+			return 1
+		}
+
 		buf := make([]uint16, int(ret)+1)
 		procGetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(int(ret)+1))
 		title := syscall.UTF16ToString(buf)
 
-		if title == window.WindowTitle {
-			foundHwnd = hwnd
-			return 0 // Stop enumeration
+		// PID & AppName
+		var pid uint32
+		procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pid)))
+		appName := w.getProcessName(pid)
+		if appName == "" {
+			appName = fmt.Sprintf("PID_%d", pid)
 		}
+
+		// Rect
+		var r rect
+		procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&r)))
+
+		candidate := core.Window{
+			WindowTitle: title,
+			AppName:     appName,
+			Width:       int(r.Right - r.Left),
+			Height:      int(r.Bottom - r.Top),
+		}
+
+		candidates = append(candidates, windowWithHandle{
+			Window: candidate,
+			Hwnd:   hwnd,
+		})
 		return 1
 	})
 	procEnumWindows.Call(cb, 0)
 
-	if foundHwnd != 0 {
-		// SWP_NOZORDER = 0x0004
+	// 2. Use Matcher
+	matcher := DefaultMatcher()
+
+	// Prepare simple list for matcher
+	var candidateList []core.Window
+	for _, c := range candidates {
+		candidateList = append(candidateList, c.Window)
+	}
+
+	match := matcher.FindBestMatch(window, candidateList)
+	if match == nil {
+		return fmt.Errorf("no suitable match found for window: %s", window.WindowTitle)
+	}
+
+	// 3. Find the HWND for the best match
+	var targetHwnd syscall.Handle
+	for _, c := range candidates {
+		// Identify by exact object properties since we just built it
+		// Or simpler: match on Title + AppName + Size
+		if c.Window.WindowTitle == match.Window.WindowTitle &&
+			c.Window.AppName == match.Window.AppName &&
+			c.Window.Width == match.Window.Width {
+			targetHwnd = c.Hwnd
+			break
+		}
+	}
+
+	if targetHwnd != 0 {
+		// Restore Position
 		procSetWindowPos.Call(
-			uintptr(foundHwnd),
+			uintptr(targetHwnd),
 			0,
 			uintptr(window.X),
 			uintptr(window.Y),
 			uintptr(window.Width),
 			uintptr(window.Height),
-			0x0004,
+			0x0004, // SWP_NOZORDER
 		)
-		// 1 = SW_SHOWNORMAL, 5 = SW_SHOW
-		procShowWindow.Call(uintptr(foundHwnd), 5)
+		procShowWindow.Call(uintptr(targetHwnd), 5) // SW_SHOW
 		return nil
 	}
 
-	return fmt.Errorf("window not found: %s", window.WindowTitle)
+	return fmt.Errorf("failed to resolve handle for matched window")
 }
 
 func (w *WindowsAdapter) CloseWindow(ctx context.Context, window core.Window) error {

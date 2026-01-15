@@ -8,17 +8,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/tuusuario/dev-env-snapshots/internal/core"
 	"github.com/tuusuario/dev-env-snapshots/internal/git"
+	"github.com/tuusuario/dev-env-snapshots/internal/sanitize"
 )
 
 type Manager struct {
-	repo     core.Repository
-	platform core.PlatformAdapter
+	repo      core.Repository
+	platform  core.PlatformAdapter
+	sanitizer *sanitize.Sanitizer
 }
 
 func NewManager(repo core.Repository, platform core.PlatformAdapter) *Manager {
 	return &Manager{
-		repo:     repo,
-		platform: platform,
+		repo:      repo,
+		platform:  platform,
+		sanitizer: sanitize.NewSanitizer(sanitize.DefaultOptions()),
 	}
 }
 
@@ -67,7 +70,24 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 		s.GitHeadHash = gitCtx.HeadHash
 	}
 
-	// 4. Save to DB
+	// Capture Browsers
+	if opts.IncludeBrowsable {
+		browsers, err := m.platform.GetBrowserTabs(ctx)
+		if err == nil && len(browsers) > 0 {
+			s.BrowserTabs = browsers
+		}
+	}
+
+	// Capture IDEs
+	ideFiles, err := m.platform.GetIDEFiles(ctx)
+	if err == nil && len(ideFiles) > 0 {
+		s.IDEFiles = ideFiles
+	}
+
+	// 4. Sanitize Snapshot Data
+	m.sanitizer.SanitizeSnapshot(s)
+
+	// 5. Save to DB
 	if err := m.repo.CreateSnapshot(ctx, s); err != nil {
 		return nil, fmt.Errorf("failed to save snapshot metadata: %w", err)
 	}
@@ -78,28 +98,19 @@ func (m *Manager) Capture(ctx context.Context, opts CaptureOptions) (*core.Snaps
 		}
 	}
 
-	// Save Terminals
 	if len(s.Terminals) > 0 {
 		if err := m.repo.SaveTerminals(ctx, s.ID, s.Terminals); err != nil {
 			return nil, fmt.Errorf("failed to save terminals: %w", err)
 		}
 	}
 
-	// Capture and Save Browsers
-	if opts.IncludeBrowsable {
-		browsers, err := m.platform.GetBrowserTabs(ctx)
-		if err == nil && len(browsers) > 0 {
-			s.BrowserTabs = browsers
-			if err := m.repo.SaveBrowserTabs(ctx, s.ID, s.BrowserTabs); err != nil {
-				return nil, fmt.Errorf("failed to save browser tabs: %w", err)
-			}
+	if len(s.BrowserTabs) > 0 {
+		if err := m.repo.SaveBrowserTabs(ctx, s.ID, s.BrowserTabs); err != nil {
+			return nil, fmt.Errorf("failed to save browser tabs: %w", err)
 		}
 	}
 
-	// Capture and Save IDEs
-	ideFiles, err := m.platform.GetIDEFiles(ctx)
-	if err == nil && len(ideFiles) > 0 {
-		s.IDEFiles = ideFiles
+	if len(s.IDEFiles) > 0 {
 		if err := m.repo.SaveIDEFiles(ctx, s.ID, s.IDEFiles); err != nil {
 			return nil, fmt.Errorf("failed to save ide files: %w", err)
 		}
