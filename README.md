@@ -65,6 +65,3 @@ Add the server to your Claude Desktop configuration file (`%APPDATA%\Claude\clau
 
 This server runs locally and inspects your window titles and process names. It does **not** upload data to the cloud; all data is stored locally in your SQLite database.
 
-## License
-
-MIT
