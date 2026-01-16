@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="200" alt="Snapshots Logo">
+</p>
+
 # Dev Environment Snapshots MCP Server
 
 A Model Context Protocol (MCP) server that enables AI assistants to capture, restore, and analyze your local development environment.
@@ -64,4 +68,3 @@ Add the server to your Claude Desktop configuration file (`%APPDATA%\Claude\clau
 ## Security Note
 
 This server runs locally and inspects your window titles and process names. It does **not** upload data to the cloud; all data is stored locally in your SQLite database.
-
