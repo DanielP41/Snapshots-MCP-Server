@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/logo.png" width="200" alt="Snapshots Logo">
-</p>
-
-# Dev Environment Snapshots MCP Server
+# Dev Environment Snapshots MCP Server <img src="assets/logo.png" align="right" width="150" alt="Snapshots Logo">
 
 A Model Context Protocol (MCP) server that enables AI assistants to capture, restore, and analyze your local development environment.
 
